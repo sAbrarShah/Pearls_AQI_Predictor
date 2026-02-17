@@ -1,0 +1,58 @@
+# ---- Python runtime / caches ----
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ---- Virtual environments ----
+.venv/
+venv/
+ENV/
+env/
+
+# ---- IDE / editor ----
+.vscode/
+.idea/
+
+# ---- OS junk ----
+.DS_Store
+Thumbs.db
+
+# ---- Secrets / local config ----
+.env
+*.env
+.env.*
+secrets*.json
+*.pem
+*.key
+
+# ---- Logs ----
+logs/
+*.log
+
+# ---- ML / experiment tracking ----
+mlruns/
+mlartifacts/
+
+# ---- Model artifacts (do not commit) ----
+models/*.joblib
+models/*.pkl
+models/*.bin
+models/*.txt
+models/best_model.json
+
+# ---- Data (do not commit) ----
+data/raw/
+data/processed/
+data/features/
+*.csv
+*.parquet
+
+# ---- Builds / dist ----
+build/
+dist/
+*.egg-info/ 
