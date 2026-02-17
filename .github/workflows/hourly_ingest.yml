@@ -1,0 +1,49 @@
+name: Hourly Ingest (Open-Meteo -> Mongo)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "7 * * * *"   # minute 07 every hour (UTC)
+
+concurrency:
+  group: aqi-hourly
+  cancel-in-progress: true
+
+jobs:
+  run_hourly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHONUNBUFFERED: "1"
+
+      # Mongo (required)
+      MONGO_URI: ${{ secrets.MONGO_URI }}
+      MONGO_DB: ${{ secrets.MONGO_DB }}
+      MONGO_RAW_COLLECTION: ${{ secrets.MONGO_RAW_COLLECTION }}
+      MONGO_CLEAN_COLLECTION: ${{ secrets.MONGO_CLEAN_COLLECTION }}
+
+      # HTTP tuning (optional; keep consistent)
+      HTTP_TIMEOUT_SEC: ${{ secrets.HTTP_TIMEOUT_SEC }}
+      HTTP_RETRIES: ${{ secrets.HTTP_RETRIES }}
+      HTTP_BACKOFF_SEC: ${{ secrets.HTTP_BACKOFF_SEC }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install system deps
+        run: sudo apt-get update && sudo apt-get install -y libgomp1
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run hourly pipeline
+        run: python scripts/run_hourly.py
