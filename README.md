@@ -1,3 +1,9 @@
+---
+title: Pearls AQI API
+sdk: docker
+app_port: 7860
+---
+
 # Pearls_AQI_Predictor
 
 End-to-end, serverless AQI forecasting for Karachi using Open-Meteo data, MongoDB Atlas storage, and DagsHub MLflow tracking—hourly ingestion, daily retraining, and 3-day predictions.

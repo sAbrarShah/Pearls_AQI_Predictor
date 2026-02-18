@@ -12,12 +12,6 @@ jobs:
         with:
           lfs: true
           fetch-depth: 0
-
-      - name: Use HF README
-        run: |
-          if [ -f README_HF.md ]; then
-            cp README_HF.md README.md
-          fi
           
       - name: Push to Space
         env:
