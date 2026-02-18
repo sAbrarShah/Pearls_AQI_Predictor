@@ -31,8 +31,8 @@ def _hydrate_env_from_streamlit_secrets() -> None:
 
 _hydrate_env_from_streamlit_secrets()
 
-MONGO_URI = os.getenv("MONGO_URI", "mongodb+srv://aqi_db_user:fireballz12345@cluster0.0oeu0zk.mongodb.net/?retryWrites=true&w=majority").strip()
-MONGO_DB = os.getenv("MONGO_DB", "aqi_database").strip() or "aqi_database"
+MONGO_URI = os.getenv("MONGO_URI", "").strip()
+MONGO_DB = os.getenv("MONGO_DB", "").strip()
 if not MONGO_URI:
     raise RuntimeError("Missing MONGO_URI. Set it in .env (local) or Streamlit/GitHub secrets (deploy).")
 

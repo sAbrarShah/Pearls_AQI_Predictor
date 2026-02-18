@@ -14,7 +14,7 @@ def _fail(msg: str) -> None:
 
 def main() -> None:
     if len(sys.argv) < 2:
-        _fail('Usage: python scripts/smoke_test_deployed_api.py "<BASE_URL>"\nExample: python scripts/smoke_test_deployed_api.py "https://your-api.onrender.com"')
+        _fail('Usage: python scripts/smoke_test_deployed_api.py "https://pearls_aqi_predictor_api.com"\n')
 
     base_url = sys.argv[1].rstrip("/")
     health_url = f"{base_url}/health"
