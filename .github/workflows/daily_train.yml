@@ -1,4 +1,4 @@
-name: Daily Train + Predict
+name: Daily Train
 
 on:
   workflow_dispatch:
@@ -6,39 +6,35 @@ on:
     - cron: "10 0 * * *"  # 00:10 UTC daily (05:10 Asia/Karachi)
 
 concurrency:
-  group: aqi-daily
+  group: aqi-daily-train
   cancel-in-progress: true
 
 jobs:
-  train_and_predict:
+  train:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
       PYTHONUNBUFFERED: "1"
 
-      # Mongo (required)
       MONGO_URI: ${{ secrets.MONGO_URI }}
       MONGO_DB: ${{ secrets.MONGO_DB }}
       MONGO_RAW_COLLECTION: ${{ secrets.MONGO_RAW_COLLECTION }}
       MONGO_CLEAN_COLLECTION: ${{ secrets.MONGO_CLEAN_COLLECTION }}
+      MONGO_MODEL_RUNS_COLLECTION: ${{ secrets.MONGO_MODEL_RUNS_COLLECTION }}
 
-      # DagsHub / MLflow (required for registry + experiment tracking)
       DAGSHUB_REPO_OWNER: ${{ secrets.DAGSHUB_REPO_OWNER }}
       DAGSHUB_REPO_NAME: ${{ secrets.DAGSHUB_REPO_NAME }}
       DAGSHUB_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
       DAGSHUB_USER_TOKEN: ${{ secrets.DAGSHUB_USER_TOKEN }}
 
-      # HTTP tuning (optional)
       HTTP_TIMEOUT_SEC: ${{ secrets.HTTP_TIMEOUT_SEC }}
       HTTP_RETRIES: ${{ secrets.HTTP_RETRIES }}
       HTTP_BACKOFF_SEC: ${{ secrets.HTTP_BACKOFF_SEC }}
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: "pip"
@@ -46,13 +42,10 @@ jobs:
       - name: Install system deps
         run: sudo apt-get update && sudo apt-get install -y libgomp1
 
-      - name: Install dependencies
+      - name: Install deps
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Train all models + select best
+      - name: Run daily train
         run: python scripts/run_daily_train.py
-
-      - name: Predict 3 days + store forecasts
-        run: python scripts/run_daily_predict.py

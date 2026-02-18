@@ -1,0 +1,51 @@
+name: Daily Predict
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "25 0 * * *"  # 00:25 UTC daily (05:25 Asia/Karachi)
+
+concurrency:
+  group: aqi-daily-predict
+  cancel-in-progress: true
+
+jobs:
+  predict:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PYTHONUNBUFFERED: "1"
+
+      MONGO_URI: ${{ secrets.MONGO_URI }}
+      MONGO_DB: ${{ secrets.MONGO_DB }}
+      MONGO_CLEAN_COLLECTION: ${{ secrets.MONGO_CLEAN_COLLECTION }}
+      MONGO_MODEL_RUNS_COLLECTION: ${{ secrets.MONGO_MODEL_RUNS_COLLECTION }}
+      MONGO_FORECAST_COLLECTION: ${{ secrets.MONGO_FORECAST_COLLECTION }}
+
+      DAGSHUB_REPO_OWNER: ${{ secrets.DAGSHUB_REPO_OWNER }}
+      DAGSHUB_REPO_NAME: ${{ secrets.DAGSHUB_REPO_NAME }}
+      DAGSHUB_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
+      DAGSHUB_USER_TOKEN: ${{ secrets.DAGSHUB_USER_TOKEN }}
+
+      HTTP_TIMEOUT_SEC: ${{ secrets.HTTP_TIMEOUT_SEC }}
+      HTTP_RETRIES: ${{ secrets.HTTP_RETRIES }}
+      HTTP_BACKOFF_SEC: ${{ secrets.HTTP_BACKOFF_SEC }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install system deps
+        run: sudo apt-get update && sudo apt-get install -y libgomp1
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run daily predict
+        run: python scripts/run_daily_predict.py
