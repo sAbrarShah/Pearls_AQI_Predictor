@@ -16,7 +16,7 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          git config user.name "github-actions"
+          git config user.name "github-action"
           git config user.email "github-actions@github.com"
-          git remote add space https://user:${HF_TOKEN}@huggingface.co/spaces/<HF_USERNAME>/<SPACE_NAME>
+          git remote add space https://user:${HF_TOKEN}@huggingface.co/spaces/sAbrarShah/pearls-aqi-api
           git push space main
