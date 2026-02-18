@@ -16,13 +16,11 @@ jobs:
     env:
       PYTHONUNBUFFERED: "1"
 
-      # Mongo (required)
       MONGO_URI: ${{ secrets.MONGO_URI }}
       MONGO_DB: ${{ secrets.MONGO_DB }}
       MONGO_RAW_COLLECTION: ${{ secrets.MONGO_RAW_COLLECTION }}
       MONGO_CLEAN_COLLECTION: ${{ secrets.MONGO_CLEAN_COLLECTION }}
 
-      # HTTP tuning (optional; keep consistent)
       HTTP_TIMEOUT_SEC: ${{ secrets.HTTP_TIMEOUT_SEC }}
       HTTP_RETRIES: ${{ secrets.HTTP_RETRIES }}
       HTTP_BACKOFF_SEC: ${{ secrets.HTTP_BACKOFF_SEC }}
