@@ -11,6 +11,7 @@ import mlflow
 import numpy as np
 import pandas as pd
 from fastapi import FastAPI, Query
+from fastapi.responses import RedirectResponse
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -26,11 +27,13 @@ MODEL_RUNS_COLLECTION = os.getenv("MONGO_MODEL_RUNS_COLLECTION", "model_runs_dai
 
 app = FastAPI(title="Pearls AQI Predictor API", version="1.0")
 
-
 @app.on_event("startup")
 def _startup() -> None:
     init_dagshub_mlflow(EXPERIMENT_NAME)
 
+@app.get("/")
+def root():
+    return RedirectResponse(url="/docs")
 
 def _load_latest_training_doc() -> dict[str, Any]:
     col = get_collection(MONGO_URI, MONGO_DB, MODEL_RUNS_COLLECTION)
@@ -38,7 +41,6 @@ def _load_latest_training_doc() -> dict[str, Any]:
     if not items:
         raise RuntimeError("model_runs_daily is empty")
     return items[0]
-
 
 def _joblib_paths_for(model_name: str) -> list[str]:
     if model_name == "aqi_linear_reg":
