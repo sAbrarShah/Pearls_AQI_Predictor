@@ -169,7 +169,7 @@ def train_and_register() -> dict[str, Any]:
                 input_example=input_example,
             )
 
-        run_id = mlflow.active_run().info.run_id  # type: ignore[union-attr]
+        run_id = mlflow.active_run().info.run_id
 
     return {
         "run_id": run_id,

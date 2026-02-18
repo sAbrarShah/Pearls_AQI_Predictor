@@ -3,13 +3,24 @@ from __future__ import annotations
 import json
 import logging
 import sys
+import os
+import mlflow
+import joblib
+import numpy as np
+import pandas as pd
 from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from aqi.models.linear_reg import forecast_3days as forecast_linear
+from aqi.dagshub_mlflow import init_dagshub_mlflow
+from aqi.config import MONGO_DB, MONGO_URI
+from aqi.mongo import get_collection
+from aqi.data import load_latest_clean
+from aqi.features import make_latest_feature_row, DEFAULT_LAGS, DEFAULT_ROLLS
+
+from aqi.models.linear_reg import forecast_3days as forecast_linear 
 from aqi.models.linear_reg import store_daily_forecast as store_linear
 
 from aqi.models.xgboost import forecast_3days as forecast_xgb
@@ -22,19 +33,74 @@ from aqi.models.lightgbm import store_daily_forecast as store_lgbm
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 log = logging.getLogger("run_daily_predict")
 
-BEST_PATH = ROOT / "models" / "best_model.json"
-FORECAST_COLLECTION = "forecasts_daily"
+MODEL_RUNS_COLLECTION = os.getenv("MONGO_MODEL_RUNS_COLLECTION", "model_runs_daily")
+FORECAST_COLLECTION = os.getenv("MONGO_FORECAST_COLLECTION", "forecasts_daily")
+EXPERIMENT_NAME = "aqi_karachi"
+DAYS_AHEAD = 3
 
 
-def _load_best_model_name() -> str | None:
-    if not BEST_PATH.exists():
-        return None
-    try:
-        obj = json.loads(BEST_PATH.read_text(encoding="utf-8"))
-        name = obj.get("model_name")
-        return str(name) if name else None
-    except Exception:
-        return None
+def _load_latest_training_doc() -> dict[str, Any]:
+    col = get_collection(MONGO_URI, MONGO_DB, MODEL_RUNS_COLLECTION)
+    doc = col.find({}, {"_id": 0}).sort("run_date", -1).limit(1)
+    items = list(doc)
+    if not items:
+        raise RuntimeError("No training metadata found in Mongo (model_runs_daily is empty).")
+    return items[0]
+
+
+def _joblib_paths_for(model_name: str) -> list[str]:
+    if model_name == "aqi_linear_reg":
+        # support both new + old filename
+        return ["local/latest_linear_reg.joblib", "local/latest_model.joblib"]
+    if model_name == "aqi_xgboost":
+        return ["local/latest_xgboost.joblib"]
+    if model_name == "aqi_lightgbm":
+        return ["local/latest_lightgbm.joblib"]
+    raise RuntimeError(f"Unknown model_name: {model_name}")
+
+
+def _load_bundle_from_run(run_id: str, model_name: str) -> dict[str, Any]:
+    last_err = None
+    for ap in _joblib_paths_for(model_name):
+        try:
+            p = mlflow.artifacts.download_artifacts(run_id=run_id, artifact_path=ap)
+            return joblib.load(p)
+        except Exception as e:
+            last_err = e
+            continue
+    raise RuntimeError(f"Failed to download joblib bundle for {model_name} run_id={run_id}: {last_err}")
+
+
+def _forecast_from_run(run_id: str, model_name: str) -> dict[str, Any]:
+    bundle = _load_bundle_from_run(run_id, model_name)
+    model = bundle["model"]
+    feature_cols = bundle["feature_cols"]
+
+    df_recent = load_latest_clean(hours=80)
+    if df_recent.empty:
+        raise RuntimeError("clean_hourly is empty")
+
+    X1, base_ts = make_latest_feature_row(df_recent, feature_cols, lags=DEFAULT_LAGS, rolls=DEFAULT_ROLLS)
+    yhat = np.asarray(model.predict(X1), dtype=float).reshape(-1)[:DAYS_AHEAD]
+    yhat = np.clip(yhat, 0.0, 500.0)
+
+    base_date = pd.to_datetime(base_ts, utc=True).date()
+    preds = [
+        {"date": (base_date + pd.Timedelta(days=d)).isoformat(), "aqi_pred": float(yhat[d - 1])}
+        for d in range(1, DAYS_AHEAD + 1)
+    ]
+
+    run_at = pd.Timestamp.utcnow().to_pydatetime()
+    return {
+        "run_at": run_at,
+        "run_date": run_at.date().isoformat(),
+        "base_timestamp": base_ts.to_pydatetime(),
+        "model_name": model_name,
+        "days_ahead": DAYS_AHEAD,
+        "definition": "daily_avg_next_24h_window",
+        "predictions": preds,
+        "mlflow_run_id": run_id,
+    }
 
 
 def _print_forecast(doc: dict[str, Any]) -> None:
@@ -53,21 +119,26 @@ def _print_forecast(doc: dict[str, Any]) -> None:
 
 
 def main() -> None:
-    best_name = _load_best_model_name()
+    init_dagshub_mlflow(EXPERIMENT_NAME)
 
-    models: list[tuple[str, Any, Any]] = [
-        ("aqi_linear_reg", forecast_linear, store_linear),
-        ("aqi_xgboost", forecast_xgb, store_xgb),
-        ("aqi_lightgbm", forecast_lgbm, store_lgbm),
+    td = _load_latest_training_doc()
+    best_name = str(td.get("best", {}).get("model_name", ""))
+
+    models: list[tuple[str, Any]] = [
+        ("aqi_linear_reg", store_linear),
+        ("aqi_xgboost", store_xgb),
+        ("aqi_lightgbm", store_lgbm),
     ]
 
-    # fallback if best_model.json missing/corrupt
-    if best_name is None:
-        best_name = "aqi_lightgbm"
+    runs = {m.get("model_name"): m.get("run_id") for m in td.get("models", [])}
 
-    for name, forecast_fn, store_fn in models:
-        doc = forecast_fn()  # must contain predictions[3]
-        doc["best"] = (doc.get("model_name") == best_name)
+    for name, store_fn in models:
+        run_id = runs.get(name)
+        if not run_id:
+            raise RuntimeError(f"Missing run_id for model {name} in model_runs_daily")
+
+        doc = _forecast_from_run(str(run_id), name)
+        doc["best"] = (name == best_name)
 
         _print_forecast(doc)
 
@@ -79,7 +150,6 @@ def main() -> None:
             doc.get("run_date"),
             int(res.get("upserted", 0)),
         )
-
-
+        
 if __name__ == "__main__":
     main()

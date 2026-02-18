@@ -4,12 +4,16 @@ import json
 import logging
 import sys
 import mlflow
+import os
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from aqi.config import MONGO_DB, MONGO_URI
+from aqi.mongo import get_collection
 from aqi.models.linear_reg import train_and_register as train_linear
 from aqi.models.xgboost import train_and_register as train_xgb
 from aqi.models.lightgbm import train_and_register as train_lgbm
@@ -18,6 +22,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(
 log = logging.getLogger("run_daily_train")
 
 BEST_PATH = ROOT / "models" / "best_model.json"
+MODEL_RUNS_COLLECTION = os.getenv("MONGO_MODEL_RUNS_COLLECTION", "model_runs_daily")
 
 def _end_run_if_any() -> None:
     if mlflow.active_run() is not None:
@@ -78,6 +83,24 @@ def main() -> None:
     best = sorted(results, key=_score_key)[0]
     BEST_PATH.parent.mkdir(parents=True, exist_ok=True)
     BEST_PATH.write_text(json.dumps(_jsonable(best), indent=2), encoding="utf-8")
+    
+    # Persist model run IDs + metrics to Mongo so predict can load models from MLflow runs
+    col = get_collection(MONGO_URI, MONGO_DB, MODEL_RUNS_COLLECTION)
+    col.create_index([("run_date", 1)], unique=True, name="uniq_run_date")
+
+    run_at = datetime.now(timezone.utc)
+    run_date = run_at.date().isoformat()
+
+    doc = {
+        "run_date": run_date,
+        "created_at": run_at,
+        "experiment_name": "aqi_karachi",
+        "models": _jsonable(results),
+        "best": _jsonable(best),
+    }
+
+    col.update_one({"run_date": run_date}, {"$set": doc}, upsert=True)
+
 
     log.info(
         "BEST model=%s | RMSE=%.3f MAE=%.3f R²=%.3f",

@@ -119,7 +119,7 @@ def train_and_register() -> dict[str, Any]:
             mlflow.log_param(f"best_iteration_day{h+1}", bi)
 
         model = MultiHorizonModel(models)
-        model.feature_columns_ = feature_cols  # type: ignore[attr-defined]
+        model.feature_columns_ = feature_cols
 
         yhat_test = model.predict(X_test)
 
