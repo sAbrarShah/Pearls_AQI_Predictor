@@ -31,11 +31,10 @@ def _hydrate_env_from_streamlit_secrets() -> None:
 
 _hydrate_env_from_streamlit_secrets()
 
-MONGO_URI = os.getenv("MONGO_URI", "").strip()
+MONGO_URI = os.getenv("MONGO_URI", "mongodb+srv://aqi_db_user:fireballz12345@cluster0.0oeu0zk.mongodb.net/?retryWrites=true&w=majority").strip()
 MONGO_DB = os.getenv("MONGO_DB", "aqi_database").strip() or "aqi_database"
 if not MONGO_URI:
     raise RuntimeError("Missing MONGO_URI. Set it in .env (local) or Streamlit/GitHub secrets (deploy).")
-
 
 FORECAST_COLLECTION = os.getenv("MONGO_FORECAST_COLLECTION", "forecasts_daily").strip() or "forecasts_daily"
 MODEL_RUNS_COLLECTION = os.getenv("MONGO_MODEL_RUNS_COLLECTION", "model_runs_daily").strip() or "model_runs_daily"
@@ -278,6 +277,14 @@ _css()
 train_doc = load_latest_training_doc(MONGO_DB, MODEL_RUNS_COLLECTION)
 forecast_doc = load_latest_best_forecast(MONGO_DB, FORECAST_COLLECTION)
 
+alerts = forecast_doc.get("alerts", [])
+if isinstance(alerts, list) and alerts:
+    worst = sorted(alerts, key=lambda x: float(x.get("aqi_pred", 0.0)), reverse=True)[0]
+    st.error(
+        f"Alert: {worst.get('level')} predicted on {worst.get('date')} "
+        f"(AQI {float(worst.get('aqi_pred', 0.0)):.0f})"
+    )
+
 models = train_doc.get("models", [])
 best = train_doc.get("best", {})
 
@@ -354,3 +361,16 @@ with right:
     if isinstance(best, dict) and best:
         why = best_reason(best, valid_models)
         st.markdown(f"<div class='reason'><b>Why this model:</b><br>{why}</div>", unsafe_allow_html=True)
+
+        tf = best.get("top_features_day1", []) if isinstance(best, dict) else []
+        method = best.get("explainability_day1", "") if isinstance(best, dict) else ""
+        if isinstance(tf, list) and tf:
+            st.markdown("---")
+            st.subheader("Top features (Day+1)")
+            st.caption(f"Method: {method}" if method else "")
+            tdf = pd.DataFrame(tf)
+            if not tdf.empty:
+                tdf = tdf.rename(columns={"feature": "Feature", "mean_abs_shap": "Mean |impact|"})
+                if "Mean |impact|" in tdf.columns:
+                    tdf["Mean |impact|"] = tdf["Mean |impact|"].map(lambda x: f"{float(x):.4f}")
+                st.dataframe(tdf, use_container_width=True, hide_index=True)

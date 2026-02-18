@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import joblib
@@ -14,6 +14,7 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from aqi.config import MONGO_DB, MONGO_URI
 from aqi.dagshub_mlflow import init_dagshub_mlflow
 from aqi.data import load_clean_hourly, load_latest_clean
+from aqi.explainability import compute_shap_top_features_tree, log_top_features_mlflow
 from aqi.features import DEFAULT_LAGS, DEFAULT_ROLLS, make_latest_feature_row, make_supervised_daily_avg
 from aqi.mongo import get_collection
 
@@ -92,6 +93,9 @@ def train_and_register() -> dict[str, Any]:
     X_train, y_train = X_tr_full.loc[~is_val], y_tr_full[~is_val]
     X_val, y_val = X_tr_full.loc[is_val], y_tr_full[is_val]
 
+    top_features_day1: list[dict[str, Any]] = []
+    explainability_day1 = "none"
+
     with mlflow.start_run():
         mlflow.log_param("model_name", MODEL_NAME)
         mlflow.log_param("model_type", "xgboost")
@@ -144,6 +148,24 @@ def train_and_register() -> dict[str, Any]:
         mlflow.log_metric("R²", R2_day1)
         mlflow.log_metric("MAPE", MAPE)
 
+        # ---- Explainability (Day+1) ----
+        # Compute SHAP on a small sample for speed + stability.
+        explainability_day1 = "shap"
+        try:
+            X_shap = X_val if len(X_val) > 0 else X_train
+            X_shap = X_shap.sample(n=min(300, len(X_shap)), random_state=42)
+            top_features_day1 = compute_shap_top_features_tree(
+                model=models[0],
+                X=X_shap,
+                feature_names=feature_cols,
+                top_k=20,
+            )
+            log_top_features_mlflow(top_features_day1, artifact_name="top_features_day1.json")
+        except Exception:
+            explainability_day1 = "none"
+            top_features_day1 = []
+        mlflow.log_param("explainability_day1", explainability_day1)
+
         os.makedirs(ARTIFACTS_DIR, exist_ok=True)
         local_path = os.path.join(ARTIFACTS_DIR, "latest_xgboost.joblib")
         joblib.dump({"model": model, "feature_cols": feature_cols, "model_name": MODEL_NAME}, local_path)
@@ -178,6 +200,8 @@ def train_and_register() -> dict[str, Any]:
         "MAE": MAE,
         "R²": R2_day1,
         "MAPE": MAPE,
+        "explainability_day1": explainability_day1,
+        "top_features_day1": top_features_day1,
         "n_train": int(len(X_train)),
         "n_val": int(len(X_val)),
         "n_test": int(len(X_test)),
@@ -202,9 +226,12 @@ def forecast_3days() -> dict[str, Any]:
     yhat = np.clip(yhat, 0.0, 500.0)
 
     base_date = pd.to_datetime(base_ts, utc=True).date()
-    preds = [{"date": (base_date + pd.Timedelta(days=d)).isoformat(), "aqi_pred": float(yhat[d - 1])} for d in range(1, DAYS_AHEAD + 1)]
+    preds = [
+        {"date": (base_date + pd.Timedelta(days=d)).isoformat(), "aqi_pred": float(yhat[d - 1])}
+        for d in range(1, DAYS_AHEAD + 1)
+    ]
 
-    run_at = pd.Timestamp.utcnow().to_pydatetime()
+    run_at = datetime.now(timezone.utc)
     return {
         "run_at": run_at,
         "run_date": run_at.date().isoformat(),
@@ -231,4 +258,8 @@ def store_daily_forecast(doc: dict[str, Any], collection_name: str) -> dict[str,
         {"$set": doc},
         upsert=True,
     )
-    return {"matched": int(res.matched_count), "modified": int(res.modified_count), "upserted": int(res.upserted_id is not None)}
+    return {
+        "matched": int(res.matched_count),
+        "modified": int(res.modified_count),
+        "upserted": int(res.upserted_id is not None),
+    }

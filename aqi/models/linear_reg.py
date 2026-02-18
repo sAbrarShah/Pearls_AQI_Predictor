@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import joblib
@@ -18,6 +18,7 @@ from sklearn.preprocessing import StandardScaler
 from aqi.config import MONGO_DB, MONGO_URI
 from aqi.dagshub_mlflow import init_dagshub_mlflow
 from aqi.data import load_clean_hourly, load_latest_clean
+from aqi.explainability import log_top_features_mlflow
 from aqi.features import (
     DEFAULT_LAGS,
     DEFAULT_ROLLS,
@@ -39,6 +40,44 @@ def _time_split(ts: pd.Series, test_days: int) -> np.ndarray:
     max_ts = pd.to_datetime(ts.max(), utc=True)
     cutoff = max_ts - timedelta(days=test_days)
     return (pd.to_datetime(ts, utc=True) > cutoff).to_numpy()
+
+
+def _top_features_from_linear_pipeline(
+    model: Pipeline,
+    feature_names: list[str],
+    top_k: int = 20,
+) -> list[dict[str, Any]]:
+    """
+    Fast explainability for linear model:
+    - Uses absolute coefficients for Day+1 estimator (most interpretable headline).
+    - Coefficients are in standardized feature space (because of StandardScaler).
+    """
+    # Pipeline: ("scaler", StandardScaler()), ("reg", MultiOutputRegressor(LinearRegression()))
+    reg = model.named_steps["reg"]
+    if not hasattr(reg, "estimators_") or not reg.estimators_:
+        return []
+
+    est0 = reg.estimators_[0]
+    coef = getattr(est0, "coef_", None)
+    if coef is None:
+        return []
+
+    coef = np.asarray(coef, dtype=float).reshape(-1)
+    if len(coef) != len(feature_names):
+        return []
+
+    abs_coef = np.abs(coef)
+    order = np.argsort(-abs_coef)[:top_k]
+
+    out: list[dict[str, Any]] = []
+    for idx in order:
+        out.append(
+            {
+                "feature": str(feature_names[int(idx)]),
+                "importance": float(abs_coef[int(idx)]),
+            }
+        )
+    return out
 
 
 def train_and_register() -> dict[str, Any]:
@@ -70,6 +109,9 @@ def train_and_register() -> dict[str, Any]:
     )
     model.feature_columns_ = feature_cols  # type: ignore[attr-defined]
 
+    top_features_day1: list[dict[str, Any]] = []
+    explainability_day1 = "none"
+
     with mlflow.start_run():
         mlflow.log_param("model_name", MODEL_NAME)
         mlflow.log_param("model_type", "linear_regression")
@@ -85,7 +127,7 @@ def train_and_register() -> dict[str, Any]:
 
         yhat_test = model.predict(X_test)
         yhat_train = model.predict(X_train)
-    
+
         y_true_test = y_test.reshape(-1)
         y_pred_test = yhat_test.reshape(-1)
         y_true_train = y_train.reshape(-1)
@@ -94,7 +136,7 @@ def train_and_register() -> dict[str, Any]:
         RMSE = float(np.sqrt(mean_squared_error(y_true_test, y_pred_test)))
         MAE = float(mean_absolute_error(y_true_test, y_pred_test))
 
-        # Keep "R²" as Day+1 R² (tomorrow), because it's the most interpretable headline
+        # Keep "R²" as Day+1 R² (tomorrow)
         R2_day1 = float(r2_score(y_test[:, 0], yhat_test[:, 0]))
 
         # MAPE (%), ignore zero/near-zero targets
@@ -110,6 +152,17 @@ def train_and_register() -> dict[str, Any]:
         mlflow.log_metric("MAE", MAE)
         mlflow.log_metric("R²", R2_day1)
         mlflow.log_metric("MAPE", MAPE)
+
+        # ---- Explainability (Day+1) ----
+        # Linear model: coefficient-based importance (fast + stable).
+        explainability_day1 = "coef"
+        try:
+            top_features_day1 = _top_features_from_linear_pipeline(model, feature_cols, top_k=20)
+            log_top_features_mlflow(top_features_day1, artifact_name="top_features_day1.json")
+        except Exception:
+            explainability_day1 = "none"
+            top_features_day1 = []
+        mlflow.log_param("explainability_day1", explainability_day1)
 
         os.makedirs(ARTIFACTS_DIR, exist_ok=True)
         local_path = os.path.join(ARTIFACTS_DIR, "latest_linear_reg.joblib")
@@ -146,6 +199,8 @@ def train_and_register() -> dict[str, Any]:
         "R²": R2_day1,
         "MAPE": MAPE,
         "Overfitting Gap": OverfitGap,
+        "explainability_day1": explainability_day1,
+        "top_features_day1": top_features_day1,
         "n_train": int(len(X_train)),
         "n_test": int(len(X_test)),
     }
@@ -176,7 +231,7 @@ def forecast_3days() -> dict[str, Any]:
             }
         )
 
-    run_at = pd.Timestamp.utcnow().to_pydatetime()
+    run_at = datetime.now(timezone.utc)
     return {
         "run_at": run_at,
         "run_date": run_at.date().isoformat(),
@@ -190,12 +245,12 @@ def forecast_3days() -> dict[str, Any]:
 
 def store_daily_forecast(doc: dict[str, Any], collection_name: str) -> dict[str, int]:
     col = get_collection(MONGO_URI, MONGO_DB, collection_name)
-    
+
     try:
         col.drop_index("uniq_run_date")
     except Exception:
         pass
-    
+
     col.create_index([("run_date", 1), ("model_name", 1)], unique=True, name="uniq_run_date_model")
 
     res = col.update_one(

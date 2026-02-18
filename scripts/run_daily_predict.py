@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 from typing import Any
+from datetime import datetime, timezone
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -20,7 +21,7 @@ from aqi.mongo import get_collection
 from aqi.data import load_latest_clean
 from aqi.features import make_latest_feature_row, DEFAULT_LAGS, DEFAULT_ROLLS
 
-from aqi.models.linear_reg import forecast_3days as forecast_linear 
+from aqi.models.linear_reg import forecast_3days as forecast_linear
 from aqi.models.linear_reg import store_daily_forecast as store_linear
 
 from aqi.models.xgboost import forecast_3days as forecast_xgb
@@ -37,6 +38,28 @@ MODEL_RUNS_COLLECTION = os.getenv("MONGO_MODEL_RUNS_COLLECTION", "model_runs_dai
 FORECAST_COLLECTION = os.getenv("MONGO_FORECAST_COLLECTION", "forecasts_daily")
 EXPERIMENT_NAME = "aqi_karachi"
 DAYS_AHEAD = 3
+
+
+def _alerts_from_predictions(preds: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    if not isinstance(preds, list):
+        return out
+
+    for p in preds:
+        try:
+            a = float(p.get("aqi_pred", 0.0))
+        except Exception:
+            continue
+
+        if a >= 301:
+            out.append({"date": p.get("date"), "aqi_pred": a, "level": "Hazardous", "threshold": 301})
+        elif a >= 201:
+            out.append({"date": p.get("date"), "aqi_pred": a, "level": "Very Unhealthy", "threshold": 201})
+        elif a >= 151:
+            out.append({"date": p.get("date"), "aqi_pred": a, "level": "Unhealthy", "threshold": 151})
+
+    out.sort(key=lambda x: float(x.get("aqi_pred", 0.0)), reverse=True)
+    return out
 
 
 def _load_latest_training_doc() -> dict[str, Any]:
@@ -90,7 +113,7 @@ def _forecast_from_run(run_id: str, model_name: str) -> dict[str, Any]:
         for d in range(1, DAYS_AHEAD + 1)
     ]
 
-    run_at = pd.Timestamp.utcnow().to_pydatetime()
+    run_at = datetime.now(timezone.utc)
     return {
         "run_at": run_at,
         "run_date": run_at.date().isoformat(),
@@ -99,6 +122,9 @@ def _forecast_from_run(run_id: str, model_name: str) -> dict[str, Any]:
         "days_ahead": DAYS_AHEAD,
         "definition": "daily_avg_next_24h_window",
         "predictions": preds,
+        "mlflow_run_id": run_id,
+        "predictions": preds,
+        "alerts": _alerts_from_predictions(preds),
         "mlflow_run_id": run_id,
     }
 
@@ -116,6 +142,17 @@ def _print_forecast(doc: dict[str, Any]) -> None:
         d = p.get("date")
         aqi = p.get("aqi_pred")
         log.info("  Day+%d | date=%s | aqi_pred=%.3f", i, d, float(aqi))
+
+    alerts = doc.get("alerts", [])
+    if isinstance(alerts, list) and alerts:
+        for a in alerts:
+            log.info(
+                "  ALERT | date=%s level=%s aqi_pred=%.3f threshold=%s",
+                a.get("date"),
+                a.get("level"),
+                float(a.get("aqi_pred", 0.0)),
+                a.get("threshold"),
+            )
 
 
 def main() -> None:
@@ -150,6 +187,7 @@ def main() -> None:
             doc.get("run_date"),
             int(res.get("upserted", 0)),
         )
-        
+
+
 if __name__ == "__main__":
     main()

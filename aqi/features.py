@@ -109,20 +109,29 @@ def make_latest_feature_row(
     feature_cols: list[str],
     lags: list[int] = DEFAULT_LAGS,
     rolls: list[int] = DEFAULT_ROLLS,
+    max_lookback_rows: int = 48,   # search last 48 engineered rows (~48h if hourly)
 ) -> tuple[pd.DataFrame, pd.Timestamp]:
     f = build_feature_frame(df_recent, lags=lags, rolls=rolls)
     if f.empty:
         raise RuntimeError("No data to build features")
 
-    last = f.iloc[-1:]
-    base_ts = pd.to_datetime(last["timestamp"].iloc[0], utc=True)
-
+    # Ensure all expected feature columns exist
     for c in feature_cols:
-        if c not in last.columns:
-            last[c] = np.nan
+        if c not in f.columns:
+            f[c] = np.nan
 
-    X1 = last[feature_cols]
-    if X1.isna().any(axis=1).iloc[0]:
-        raise RuntimeError("Latest feature row has missing values (need more history or cleaner data).")
+    tail = f.tail(max_lookback_rows).copy()
+    X = tail[feature_cols]
 
-    return X1, base_ts
+    valid = ~X.isna().any(axis=1)
+    if not bool(valid.any()):
+        raise RuntimeError(
+            "No complete feature row available in recent window "
+            "(missing values after lags/rolls). Increase history or relax features."
+        )
+
+    idx = valid[valid].index[-1]
+    row = f.loc[[idx]].copy()
+    base_ts = pd.to_datetime(row["timestamp"].iloc[0], utc=True)
+
+    return row[feature_cols], base_ts
