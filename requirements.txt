@@ -16,3 +16,6 @@ lightgbm==4.3.0
 streamlit
 plotly
 statsmodels
+shap
+fastapi
+uvicorn[standard]
