@@ -45,7 +45,7 @@ jobs:
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements-train.txt
+          pip install -r requirements.txt
 
       - name: Run daily train
         run: python scripts/run_daily_train.py

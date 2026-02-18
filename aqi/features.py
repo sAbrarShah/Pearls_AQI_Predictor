@@ -84,15 +84,13 @@ def make_supervised_daily_avg(
 
     y_cols = []
     for d in range(1, days_ahead + 1):
-        end_shift = -(d * window_hours)  # aligns end of window to current row
+        end_shift = -(d * window_hours)
         y_d = s.shift(end_shift).rolling(window_hours, min_periods=window_hours).mean()
         y_cols.append(y_d.rename(f"y_day{d}"))
 
     y_df = pd.concat(y_cols, axis=1)
 
-    # feature columns (exclude timestamp)
     feature_cols = [c for c in f.columns if c != "timestamp"]
-
     X = f[feature_cols]
     ts = f["timestamp"]
 
@@ -109,13 +107,12 @@ def make_latest_feature_row(
     feature_cols: list[str],
     lags: list[int] = DEFAULT_LAGS,
     rolls: list[int] = DEFAULT_ROLLS,
-    max_lookback_rows: int = 48,   # search last 48 engineered rows (~48h if hourly)
+    max_lookback_rows: int = 48,
 ) -> tuple[pd.DataFrame, pd.Timestamp]:
     f = build_feature_frame(df_recent, lags=lags, rolls=rolls)
     if f.empty:
         raise RuntimeError("No data to build features")
 
-    # Ensure all expected feature columns exist
     for c in feature_cols:
         if c not in f.columns:
             f[c] = np.nan

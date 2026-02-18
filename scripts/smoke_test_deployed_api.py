@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import json
 import sys
-from typing import Any
-
 import requests
 
 
@@ -14,14 +11,14 @@ def _fail(msg: str) -> None:
 
 def main() -> None:
     if len(sys.argv) < 2:
-        _fail('Usage: python scripts/smoke_test_deployed_api.py "https://pearls_aqi_predictor_api.com"\n')
+        _fail('Usage: python scripts/smoke_test_deployed_api.py "https://your-api-base-url"\n')
 
     base_url = sys.argv[1].rstrip("/")
     health_url = f"{base_url}/health"
     predict_url = f"{base_url}/predict"
 
     print("=" * 70)
-    print("DEPLOYED API SMOKE TEST: /health + /predict")
+    print("DEPLOYED API SMOKE TEST: /health + /predict (GET)")
     print("=" * 70)
     print(f"API: {base_url}")
 
@@ -38,15 +35,11 @@ def main() -> None:
         health = r.json()
     except Exception:
         _fail(f"/health returned non-JSON: {r.text[:400]}")
-
     print(f"[OK] /health: {health}")
 
-    # predict
-    payload: dict[str, Any] = {"city": "Karachi", "days": 3, "model": "best"}  # keep consistent with your API
-    headers = {"Content-Type": "application/json"}
-
+    # predict (GET)
     try:
-        r2 = requests.post(predict_url, headers=headers, data=json.dumps(payload), timeout=60)
+        r2 = requests.get(predict_url, params={"days": 3}, timeout=60)
     except Exception as e:
         _fail(f"/predict request error: {e}")
 
@@ -58,7 +51,6 @@ def main() -> None:
     except Exception:
         _fail(f"/predict returned non-JSON: {r2.text[:800]}")
 
-    # validate shape
     preds = out.get("predictions")
     if not isinstance(preds, list) or len(preds) < 1:
         _fail(f"/predict missing predictions list | keys={list(out.keys())}")

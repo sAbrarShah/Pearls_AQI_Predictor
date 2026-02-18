@@ -26,7 +26,7 @@ MODEL_RUNS_COLLECTION = os.getenv("MONGO_MODEL_RUNS_COLLECTION", "model_runs_dai
 
 def _end_run_if_any() -> None:
     if mlflow.active_run() is not None:
-        mlflow.end_run()
+        _end_run_if_any()
 
 def _score_key(out: dict[str, Any]) -> tuple[float, float, float]:
     # Lower RMSE better, lower MAE better, higher R² better
@@ -75,7 +75,7 @@ def main() -> None:
         except Exception as e:
             log.exception("TRAIN failed | err=%s", e)
         finally:
-            mlflow.end_run()
+            _end_run_if_any()
             
     if not results:
         raise RuntimeError("All model trainings failed; no best model can be selected.")

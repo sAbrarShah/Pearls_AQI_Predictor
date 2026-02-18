@@ -1,9 +1,3 @@
----
-title: Pearls AQI API
-sdk: docker
-app_port: 7860
----
-
 # Pearls_AQI_Predictor
 
 End-to-end, serverless AQI forecasting for Karachi using Open-Meteo data, MongoDB Atlas storage, and DagsHub MLflow tracking—hourly ingestion, daily retraining, and 3-day predictions.
@@ -41,11 +35,11 @@ Table of Contents
 
 ## Project Overview
 
-Pearls_AQI_Predictor forecasts AQI for Karachi (1–7 days) using meteorological & pollutant data from Open‑Meteo and a set of engineered features. The repository contains:
+Pearls_AQI_Predictor forecasts AQI for Karachi (3 days) using meteorological & pollutant data from Open‑Meteo and a set of engineered features. The repository contains:
 
 - An hourly ingestion pipeline to fetch and store raw and engineered features
 - Feature engineering producing a comprehensive set of features (temporal, cyclical, rolling statistics, pollutant interactions)
-- Multiple ML models (RandomForest, Ridge, XGBoost, LightGBM) and Voting/ensemble strategies
+- Multiple ML models (Linear Regression, XGBoost, LightGBM)
 - Model registry & versioning (MongoDB / MLflow/DagsHub integration)
 - FastAPI-based prediction API
 - Streamlit dashboard for visualizing forecasts and model metrics
@@ -140,32 +134,41 @@ pip install -r requirements.txt
 
 4. Create a `.env` file (example below)
 ```env
-MONGODB_URI=mongodb+srv://<username>:<password>@cluster.mongodb.net/pearls_aqi?retryWrites=true&w=majority
-FASTAPI_URL=http://localhost:8000
-CITY_NAME=Karachi
-LATITUDE=24.8608
-LONGITUDE=67.0104
-TIMEZONE=Asia/Karachi
+MONGO_URI=mongodb+srv://<username>:<password>@cluster.mongodb.net/?retryWrites=true&w=majority
+MONGO_DB=aqi_database
+MONGO_RAW_COLLECTION=raw_hourly
+MONGO_CLEAN_COLLECTION=clean_hourly
+MONGO_FORECAST_COLLECTION=forecasts_daily
+MONGO_MODEL_RUNS_COLLECTION=model_runs_daily
+
+DAGSHUB_REPO_OWNER=<owner>
+DAGSHUB_REPO_NAME=<repo>
+DAGSHUB_USERNAME=<username>
+DAGSHUB_USER_TOKEN=<token>
+
+HTTP_TIMEOUT_SEC=25
+HTTP_RETRIES=4
+HTTP_BACKOFF_SEC=1.0
 ```
 
-5. Verify MongoDB connectivity
+5. (First-time only) Backfill historical data (recommended)
 ```bash
-python scripts/test_mongodb.py
+python scripts/backfill.py
 ```
 
-6. Run feature pipeline (fetch current data and store features)
+6. Run hourly ingestion once
 ```bash
-python pipelines/feature_pipeline.py
+python scripts/run_hourly.py
 ```
 
-7. (Optional) Backfill historical data
+7. Train models and write training metadata to Mongo + DagsHub MLflow
 ```bash
-python scripts/run_optimized_backfill.py --resume
+python scripts/run_daily_train.py
 ```
 
-8. Train models locally (runs model training and pushes selected model to registry)
+8. Generate daily forecasts for all models and store to Mongo
 ```bash
-python pipelines/training_pipeline.py
+python scripts/run_daily_predict.py
 ```
 
 9. Run FastAPI locally
@@ -176,35 +179,22 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 
 10. Run Streamlit dashboard locally
 ```bash
-streamlit run app/dashboard.py
+streamlit run apps/dashboard.py
 ```
-Open dashboard at http://localhost:8501 and API at http://localhost:8000
+Open:
+Dashboard: http://localhost:8501
+API docs: http://localhost:8000/docs
+API predict: http://localhost:8000/predict?days=3
 
 ---
 
 ## Configuration
 
 Primary configuration files and environment variables:
-- `.env` — environment variables (MONGODB_URI, FASTAPI_URL, etc.)
-- `config/config.yaml` — city config and other defaults (latitude, longitude, timezone)
-- `config/settings.py` — loader for configuration and secrets
-- `.streamlit/secrets.toml` — secrets for Streamlit Cloud (FASTAPI_URL, MONGODB_URI)
+- `.env` — environment variables (MONGODB_URI, DAGSHUB_TOKEN, etc.)
+- `aqi/config.py` — city config and other defaults (latitude, longitude, timezone)
+- `.streamlit/secrets.toml` — secrets for Streamlit Cloud (MONGODB_URI, DAGSHUB_TOKEN)
 
-Example `config/config.yaml`:
-```yaml
-city:
-  name: "Karachi"
-  latitude: 24.8608
-  longitude: 67.0104
-  timezone: "Asia/Karachi"
-
-models:
-  algorithms:
-    - "linear_regression"
-    - "xgboost"
-    - "lightgbm"
-  forecast_days: 3
-```
 
 ---
 
@@ -255,14 +245,9 @@ API examples
 curl GET http://localhost:8000/health
 ```
 
-- List models:
-```bash
-curl GET http://localhost:8000/models
-```
-
 - Predict (example)
 ```bash
-curl -X POST http://localhost:8000/predict \
+curl -X GET http://localhost:8000/predict?days=3 \
   -H "Content-Type: application/json" \
   -d '{"forecast_days": 3, "latitude": 24.8608, "longitude": 67.0104}'
 ```
@@ -335,7 +320,7 @@ Base URL: https://huggingface.co/spaces/sAbrarShah/pearls-aqi-api
 
 Endpoints:
 - GET `/health` — service health & DB connection
-- POST `/predict` — request forecast for N days (payload: forecast_days, latitude, longitude)
+- GET `/predict?days=3` — request forecast for 3 days (payload: forecast_days, latitude, longitude)
 
 ---
 
@@ -371,8 +356,6 @@ Contributions are welcome. Typical workflow:
 2. Create a feature branch (feature/your-feature)
 3. Add tests / update docs
 4. Open a pull request with a description of changes
-
-Please follow repo coding style and add tests for critical functionality (pipelines, API endpoints).
 
 ---
 

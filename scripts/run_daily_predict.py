@@ -122,8 +122,6 @@ def _forecast_from_run(run_id: str, model_name: str) -> dict[str, Any]:
         "days_ahead": DAYS_AHEAD,
         "definition": "daily_avg_next_24h_window",
         "predictions": preds,
-        "mlflow_run_id": run_id,
-        "predictions": preds,
         "alerts": _alerts_from_predictions(preds),
         "mlflow_run_id": run_id,
     }
