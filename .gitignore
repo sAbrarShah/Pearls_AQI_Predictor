@@ -29,6 +29,7 @@ Thumbs.db
 secrets*.json
 *.pem
 *.key
+.streamlit/secrets.toml
 
 # ---- Logs ----
 logs/

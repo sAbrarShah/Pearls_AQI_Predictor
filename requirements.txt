@@ -12,3 +12,6 @@ dagshub==0.6.5
 
 xgboost==2.0.3
 lightgbm==4.3.0
+
+streamlit
+plotly
