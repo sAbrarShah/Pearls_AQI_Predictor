@@ -2,9 +2,9 @@
 
 End-to-end, serverless AQI forecasting for Karachi using Open-Meteo data, MongoDB Atlas storage, and DagsHub MLflow tracking—hourly ingestion, daily retraining, and 3-day predictions.
 
-**Live Application**: https://pearls-aqi-predictor-karachi.streamlit.app
-**API Endpoint**: https://huggingface.co/spaces/sAbrarShah/pearls-aqi-api  
-**Submission Portal**: https://shine.10pearls.com/candidate/submissions
+**Live Application**: `https://pearls-aqi-predictor-karachi.streamlit.app`
+**API Endpoint**: `https://huggingface.co/spaces/sAbrarShah/pearls-aqi-api`
+**Submission Portal**: `https://shine.10pearls.com/candidate/submissions`
 
 Short description:
 This repository contains an end-to-end Air Quality Index (AQI) prediction system built with hourly feature ingestion, automated feature engineering, multiple ML models, a production REST API, and an interactive dashboard. The system is designed for deployment in serverless/cloud environments and stores features/models in MongoDB Atlas with MLflow/DagsHub tracking.
@@ -73,7 +73,6 @@ Components:
 ## Key Features
 
 - Hourly automated ingestion and feature generation
-- 60–80 engineered features per timestamp (temporal, cyclical, lags, rolling stats)
 - Multiple model types (automatic best-model selection)
 - Model registry with versioning, metrics, and metadata
 - FastAPI endpoints: health, list models, predict (3 days)
@@ -389,3 +388,4 @@ Author
 
 Version: 1.0.0  
 Last updated: 2026-02-18
+
